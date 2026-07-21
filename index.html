@@ -1270,60 +1270,35 @@ const SUPABASE_URL = 'https://vnusiziojscyvfjsikby.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZudXNpemlvanNjeXZmanNpa2J5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MTQ3MTksImV4cCI6MjA5MjA5MDcxOX0.rAkxH30PaUw-cp0lRdDJbSNlSrsZnaci-V0-U532Lfc';
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-async function uploadToSupabase(file) {
+async function uploadToImgur(file) {
   try {
-    const ext = file.name.split('.').pop() || 'jpg';
-    const fileName = 'camisa_' + Date.now() + '_' + Math.random().toString(36).slice(2) + '.' + ext;
+    const formData = new FormData();
+    formData.append('image', file);
+    formData.append('type', 'file');
     
-    console.log('Uploading to Supabase:', fileName);
+    const res = await fetch('https://api.imgur.com/3/image', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Client-ID 546c25a59c58ad7'
+      },
+      body: formData
+    });
     
-    const { data, error } = await supabaseClient.storage
-      .from('mmsports')
-      .upload(fileName, file, {
-        cacheControl: '3600',
-        upsert: true,
-        contentType: file.type
-      });
-    
-    if (error) {
-      console.error('Supabase upload error:', JSON.stringify(error));
-      // Try direct REST API as fallback
-      return await uploadViaRest(file, fileName);
+    const data = await res.json();
+    if (data.success && data.data && data.data.link) {
+      console.log('Imgur upload success:', data.data.link);
+      return data.data.link;
     }
-    
-    const { data: urlData } = supabaseClient.storage
-      .from('mmsports')
-      .getPublicUrl(fileName);
-    
-    console.log('Upload success:', urlData.publicUrl);
-    return urlData.publicUrl;
+    console.error('Imgur error:', data);
+    return null;
   } catch(e) {
     console.error('Upload error:', e);
     return null;
   }
 }
 
-async function uploadViaRest(file, fileName) {
-  try {
-    const res = await fetch(`https://vnusiziojscyvfjsikby.supabase.co/storage/v1/object/mmsports/${fileName}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZudXNpemlvanNjeXZmanNpa2J5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MTQ3MTksImV4cCI6MjA5MjA5MDcxOX0.rAkxH30PaUw-cp0lRdDJbSNlSrsZnaci-V0-U532Lfc`,
-        'Content-Type': file.type,
-        'x-upsert': 'true'
-      },
-      body: file
-    });
-    if (res.ok) {
-      return `https://vnusiziojscyvfjsikby.supabase.co/storage/v1/object/public/mmsports/${fileName}`;
-    }
-    const err = await res.text();
-    console.error('REST upload error:', err);
-    return null;
-  } catch(e) {
-    console.error('REST error:', e);
-    return null;
-  }
+async function uploadToSupabase(file) {
+  return await uploadToImgur(file);
 }
 
 async function uploadMultipleToCloudinary(files) {
@@ -1337,12 +1312,8 @@ async function uploadMultipleToCloudinary(files) {
   return urls;
 }
 </script>
-
-
 <script>
-  // Using Supabase for all cloud storage
-  let db = null; // Firebase disabled
-
+  // Cloud save/load using Supabase
   async function saveToCloud() {
     try {
       const toSave = products.map(p => {
@@ -1413,14 +1384,18 @@ async function uploadMultipleToCloudinary(files) {
     }
   }
 
+  // Auto-load on startup
   window.addEventListener('load', async () => {
     const loaded = await loadFromCloud();
     if (loaded) {
       render();
       updateCart();
-      showToast('✅ Dados carregados!');
     }
   });
 </script>
+
+
+
+
 </body>
 </html>
