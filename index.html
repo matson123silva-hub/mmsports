@@ -392,14 +392,9 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:40px
     </div>
     <div class="form-row full">
       <div class="form-group">
-        <label>Links das fotos (cole um por linha)</label>
-        <textarea id="f_urls" placeholder="Cole aqui os links das fotos&#10;Ex: https://...supabase.co/storage/...&#10;Pode colocar vários links, um por linha" 
-          style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:var(--radius);font-family:'Barlow',sans-serif;font-size:12px;outline:none;min-height:80px;resize:vertical;" 
-          onfocus="this.style.borderColor='var(--accent)'" 
-          onblur="this.style.borderColor='var(--border)'"></textarea>
-        <div style="font-size:10px;color:var(--muted);margin-top:4px;">📌 Faça upload no Supabase Storage → copie o link → cole aqui</div>
-        <div id="f_url_previews" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"></div>
-        <input type="file" id="f_img" accept="image/*" multiple style="display:none">
+        <input type="file" id="f_img" accept="image/*" multiple style="display:none" onchange="previewImgMulti(this)">
+        <button class="upload-btn" onclick="document.getElementById('f_img').click()">📸 Toque para escolher fotos</button>
+        <div id="f_img_previews" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"></div>
       </div>
     </div>
     <button class="admin-btn" onclick="addProduct()">✅ Adicionar ao Catálogo</button>
@@ -865,27 +860,34 @@ function addProduct() {
   
   if (!team) { showToast('⚠️ Digite o nome do time!'); return; }
 
-  // Get URLs from textarea
-  const urlsText = document.getElementById('f_urls').value.trim();
-  const photoUrls = urlsText ? urlsText.split('\n').map(u=>u.trim()).filter(u=>u.startsWith('http')) : [];
+  const imgFiles = Array.from(document.getElementById('f_img').files || []);
 
-  const newId = nextId++;
-  const photoKey = photoUrls.length > 0 ? 'custom_' + newId : null;
-  if (photoKey) PRODUCT_PHOTOS[photoKey] = photoUrls;
-  
-  products.push({ 
-    id: newId, team, liga, type, gender, price, vista, sizes, 
-    badge: null, photoKey: photoKey, img: null, 
-    name: type==='jog'?'Camisa Jogador':'Camisa Torcedor' 
-  });
-  
-  render(); 
-  renderAdminList();
-  document.getElementById('f_team').value = '';
-  document.getElementById('f_urls').value = '';
-  document.getElementById('f_url_previews').innerHTML = '';
-  saveData();
-  showToast('✅ ' + team + ' adicionado!');
+  const finishAdd = (photoUrls) => {
+    const newId = nextId++;
+    const photoKey = photoUrls.length > 0 ? 'custom_' + newId : null;
+    if (photoKey) PRODUCT_PHOTOS[photoKey] = photoUrls;
+    products.push({ 
+      id: newId, team, liga, type, gender, price, vista, sizes,
+      badge: null, photoKey: photoKey, img: null,
+      name: type==='jog'?'Camisa Jogador':'Camisa Torcedor'
+    });
+    render(); renderAdminList();
+    document.getElementById('f_team').value = '';
+    document.getElementById('f_img').value = '';
+    const prev = document.getElementById('f_img_previews');
+    if (prev) prev.innerHTML = '';
+    saveData();
+    showToast('✅ ' + team + ' adicionado!');
+  };
+
+  if (imgFiles.length > 0) {
+    showToast('📤 Enviando fotos...');
+    uploadMultipleToCloudinary(imgFiles).then(urls => {
+      finishAdd(urls.length > 0 ? urls : []);
+    });
+  } else {
+    finishAdd([]);
+  }
 }
 
 function deleteProduct(id) {
