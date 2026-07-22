@@ -1315,7 +1315,10 @@ async function uploadMultipleToCloudinary(files) {
 }
 </script>
 <script>
-  // Cloud save/load using Supabase
+  // Cloud save/load using JSONBin.io (free forever)
+  const JSONBIN_KEY = '$2a$10$TY9H1rRZE5JC05tYOCsNtu4mR6RjwXUiVR/aun2w1tEzj6Y62Y7rS';
+  let JSONBIN_ID = localStorage.getItem('mm_jsonbin_id') || null;
+
   async function saveToCloud() {
     try {
       const toSave = products.map(p => {
@@ -1325,24 +1328,51 @@ async function uploadMultipleToCloudinary(files) {
           id: p.id, team: p.team, liga: p.liga, type: p.type,
           gender: p.gender, price: p.price, vista: p.vista,
           sizes: p.sizes, badge: p.badge || null, name: p.name || '',
-          photoKey: p.photoKey || null, img: null,
-          cloudPhotos: cloudPhotos, featured: p.featured || false
+          photoKey: p.photoKey || null, cloudPhotos: cloudPhotos,
+          featured: p.featured || false
         };
       });
 
-      const payload = JSON.stringify({
+      const payload = {
         products: toSave,
         config: config,
         nextId: nextId,
         updatedAt: new Date().toISOString()
-      });
+      };
 
-      const { error } = await supabaseClient
-        .from('mmsports_data')
-        .upsert({ id: 1, data: payload }, { onConflict: 'id' });
-
-      if (error) throw error;
-      return true;
+      if (JSONBIN_ID) {
+        // Update existing bin
+        const res = await fetch('https://api.jsonbin.io/v3/b/' + JSONBIN_ID, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Master-Key': JSONBIN_KEY
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.metadata) return true;
+        throw new Error('Update failed');
+      } else {
+        // Create new bin
+        const res = await fetch('https://api.jsonbin.io/v3/b', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Master-Key': JSONBIN_KEY,
+            'X-Bin-Name': 'mmsports',
+            'X-Bin-Private': 'false'
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.metadata && data.metadata.id) {
+          JSONBIN_ID = data.metadata.id;
+          localStorage.setItem('mm_jsonbin_id', JSONBIN_ID);
+          return true;
+        }
+        throw new Error('Create failed');
+      }
     } catch(e) {
       console.error('Erro ao salvar:', e);
       return false;
@@ -1351,16 +1381,15 @@ async function uploadMultipleToCloudinary(files) {
 
   async function loadFromCloud() {
     try {
-      const { data, error } = await supabaseClient
-        .from('mmsports_data')
-        .select('data')
-        .eq('id', 1)
-        .single();
+      if (!JSONBIN_ID) return false;
+      
+      const res = await fetch('https://api.jsonbin.io/v3/b/' + JSONBIN_ID + '/latest', {
+        headers: { 'X-Master-Key': JSONBIN_KEY }
+      });
+      const data = await res.json();
+      if (!data.record) return false;
 
-      if (error || !data) return false;
-
-      const parsed = JSON.parse(data.data);
-
+      const parsed = data.record;
       if (parsed.products && parsed.products.length > 0) {
         const updated = parsed.products.map(saved => {
           if (saved.cloudPhotos && saved.cloudPhotos.length > 0) {
@@ -1386,7 +1415,6 @@ async function uploadMultipleToCloudinary(files) {
     }
   }
 
-  // Auto-load on startup
   window.addEventListener('load', async () => {
     const loaded = await loadFromCloud();
     if (loaded) {
