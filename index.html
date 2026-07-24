@@ -899,6 +899,7 @@ function deleteProduct(id) {
     render();
     renderAdminList();
     saveData();
+    if (window.fsDeleteProduct) window.fsDeleteProduct(id).catch(e => console.error(e));
     showToast('🗑 ' + name + ' removido!');
   } else {
     showToast('⚠️ Produto não encontrado!');
@@ -1265,42 +1266,144 @@ updateCart();
 
 
 
-<!-- Supabase Integration -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-const SUPABASE_URL = 'https://vnusiziojscyvfjsikby.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZudXNpemlvanNjeXZmanNpa2J5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MTQ3MTksImV4cCI6MjA5MjA5MDcxOX0.rAkxH30PaUw-cp0lRdDJbSNlSrsZnaci-V0-U532Lfc';
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+<!-- Firebase + Cloudinary Integration (substitui Supabase/Imgur/JSONBin) -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore, collection, getDocs, doc, setDoc, deleteDoc,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-async function uploadToImgur(file) {
-  try {
-    const formData = new FormData();
-    formData.append('image', file);
-    formData.append('type', 'file');
-    
-    const res = await fetch('https://api.imgur.com/3/image', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Client-ID 546c25a59c58ad7'
-      },
-      body: formData
-    });
-    
-    const data = await res.json();
-    if (data.success && data.data && data.data.link) {
-      console.log('Imgur upload success:', data.data.link);
-      return data.data.link;
-    }
-    console.error('Imgur error:', data);
-    return null;
-  } catch(e) {
-    console.error('Upload error:', e);
-    return null;
-  }
+const firebaseConfig = {
+  apiKey: "AIzaSyDVkKp_50LrrlHvDv5nvgUjXRydURGSEqM",
+  authDomain: "mmsports-5b596.firebaseapp.com",
+  projectId: "mmsports-5b596",
+  storageBucket: "mmsports-5b596.firebasestorage.app",
+  messagingSenderId: "264052280578",
+  appId: "1:264052280578:web:618acd5ff930ecf663061b",
+  measurementId: "G-0R3LTLW71K",
+};
+
+const CLOUDINARY_CLOUD_NAME = "dsa2uyeu7";
+const CLOUDINARY_UPLOAD_PRESET = "dsa2uyeu7";
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const CAMISAS_COLLECTION = "camisas";
+
+// Converte um doc do Firestore (schema do importador em massa) pro formato que o site usa
+function fsNormalizeGender(g) {
+  return g === "Feminino" ? "fem" : "masc";
+}
+function fsGenderToLabel(g) {
+  return g === "fem" ? "Feminino" : "Masculino";
+}
+function fsNormalizeLiga(liga) {
+  const map = {
+    "Brasileirao": "brasileirao",
+    "Premier League": "premier",
+    "La Liga": "laliga",
+    "Serie A": "seriea",
+    "Bundesliga": "bundesliga",
+    "Ligue 1": "ligue1",
+    "Selecoes": "selecoes",
+  };
+  return map[liga] || (liga || "outras");
+}
+function fsModeloToType(modelo) {
+  return modelo === "Jogador" ? "jog" : "tor";
+}
+function fsTypeToModelo(type) {
+  return type === "jog" ? "Jogador" : "Torcedor";
 }
 
+// Gera um ID numérico estável a partir do docId (texto) do Firestore,
+// porque o site espera IDs numéricos simples nos botões (onclick="...(${p.id})")
+window.fsIdMap = window.fsIdMap || {};
+function fsHashId(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+function fsDocToProduct(docId, d) {
+  const id = fsHashId(docId);
+  window.fsIdMap[id] = docId;
+  return {
+    id,
+    team: d.time || "",
+    liga: fsNormalizeLiga(d.liga),
+    type: fsModeloToType(d.modelo),
+    gender: fsNormalizeGender(d.genero),
+    price: d.precoParcelado || 0,
+    vista: d.precoVista || 0,
+    sizes: Array.isArray(d.tamanhos) ? d.tamanhos : [],
+    photoKey: d.fotoUrl ? ("fs_" + id) : undefined,
+    _fsPhotoUrl: d.fotoUrl || null,
+    featured: !!d.destaque,
+  };
+}
+
+// Converte um produto do site de volta pro schema do Firestore
+function productToFsDoc(p, photoUrl) {
+  return {
+    time: p.team || "",
+    liga: p.liga || "",
+    modelo: fsTypeToModelo(p.type),
+    genero: fsGenderToLabel(p.gender),
+    precoVista: parseFloat(p.vista) || 0,
+    precoParcelado: parseFloat(p.price) || 0,
+    tamanhos: p.sizes || [],
+    fotoUrl: photoUrl || null,
+    destaque: !!p.featured,
+    criadoEm: new Date().toISOString(),
+  };
+}
+
+window.fsUploadPhoto = async function (file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+  const resposta = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+    { method: "POST", body: formData }
+  );
+  const dados = await resposta.json();
+  return dados.secure_url || null;
+};
+
+window.fsLoadProducts = async function () {
+  const snapshot = await getDocs(collection(db, CAMISAS_COLLECTION));
+  const products = [];
+  const photos = {};
+  snapshot.forEach((docSnap) => {
+    const prod = fsDocToProduct(docSnap.id, docSnap.data());
+    if (prod.photoKey && prod._fsPhotoUrl) {
+      photos[prod.photoKey] = [prod._fsPhotoUrl];
+    }
+    delete prod._fsPhotoUrl;
+    products.push(prod);
+  });
+  return { products, photos };
+};
+
+window.fsSaveProduct = async function (p, photoUrl) {
+  const docId = window.fsIdMap[p.id] || String(p.id);
+  await setDoc(doc(db, CAMISAS_COLLECTION, docId), productToFsDoc(p, photoUrl), { merge: true });
+};
+
+window.fsDeleteProduct = async function (id) {
+  const docId = window.fsIdMap[id] || String(id);
+  await deleteDoc(doc(db, CAMISAS_COLLECTION, docId));
+  delete window.fsIdMap[id];
+};
+
+window.fsReady = true;
+</script>
+<script>
 async function uploadToSupabase(file) {
-  return await uploadToImgur(file);
+  if (window.fsUploadPhoto) return await window.fsUploadPhoto(file);
+  return null;
 }
 
 async function uploadMultipleToCloudinary(files) {
@@ -1315,102 +1418,52 @@ async function uploadMultipleToCloudinary(files) {
 }
 </script>
 <script>
-  // Cloud save/load using JSONBin.io (free forever)
-  const JSONBIN_KEY = '$2a$10$TY9H1rRZE5JC05tYOCsNtu4mR6RjwXUiVR/aun2w1tEzj6Y62Y7rS';
-  let JSONBIN_ID = localStorage.getItem('mm_jsonbin_id') || null;
+  // Cloud save/load usando Firestore (substitui o JSONBin quebrado)
+  function waitForFirebase() {
+    return new Promise((resolve) => {
+      if (window.fsReady) return resolve();
+      const iv = setInterval(() => {
+        if (window.fsReady) { clearInterval(iv); resolve(); }
+      }, 100);
+    });
+  }
 
   async function saveToCloud() {
     try {
-      const toSave = products.map(p => {
+      await waitForFirebase();
+      for (const p of products) {
         const photos = (p.photoKey && PRODUCT_PHOTOS[p.photoKey]) ? PRODUCT_PHOTOS[p.photoKey] : [];
-        const cloudPhotos = photos.filter(u => typeof u === 'string' && u.startsWith('http'));
-        return {
-          id: p.id, team: p.team, liga: p.liga, type: p.type,
-          gender: p.gender, price: p.price, vista: p.vista,
-          sizes: p.sizes, badge: p.badge || null, name: p.name || '',
-          photoKey: p.photoKey || null, cloudPhotos: cloudPhotos,
-          featured: p.featured || false
-        };
-      });
-
-      const payload = {
-        products: toSave,
-        config: config,
-        nextId: nextId,
-        updatedAt: new Date().toISOString()
-      };
-
-      if (JSONBIN_ID) {
-        // Update existing bin
-        const res = await fetch('https://api.jsonbin.io/v3/b/' + JSONBIN_ID, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Master-Key': JSONBIN_KEY
-          },
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if (data.metadata) return true;
-        throw new Error('Update failed');
-      } else {
-        // Create new bin
-        const res = await fetch('https://api.jsonbin.io/v3/b', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Master-Key': JSONBIN_KEY,
-            'X-Bin-Name': 'mmsports',
-            'X-Bin-Private': 'false'
-          },
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if (data.metadata && data.metadata.id) {
-          JSONBIN_ID = data.metadata.id;
-          localStorage.setItem('mm_jsonbin_id', JSONBIN_ID);
-          return true;
+        let photoUrl = photos.find(u => typeof u === 'string' && u.startsWith('http')) || null;
+        // Se a foto ainda é base64 (recém adicionada), sobe pro Cloudinary antes de salvar
+        const base64Photo = photos.find(u => typeof u === 'string' && u.startsWith('data:'));
+        if (!photoUrl && base64Photo) {
+          const blob = await (await fetch(base64Photo)).blob();
+          photoUrl = await window.fsUploadPhoto(blob);
+          if (photoUrl) {
+            PRODUCT_PHOTOS[p.photoKey] = [photoUrl];
+          }
         }
-        throw new Error('Create failed');
+        await window.fsSaveProduct(p, photoUrl);
       }
+      return true;
     } catch(e) {
-      console.error('Erro ao salvar:', e);
+      console.error('Erro ao salvar no Firestore:', e);
       return false;
     }
   }
 
   async function loadFromCloud() {
     try {
-      if (!JSONBIN_ID) return false;
-      
-      const res = await fetch('https://api.jsonbin.io/v3/b/' + JSONBIN_ID + '/latest', {
-        headers: { 'X-Master-Key': JSONBIN_KEY }
-      });
-      const data = await res.json();
-      if (!data.record) return false;
-
-      const parsed = data.record;
-      if (parsed.products && parsed.products.length > 0) {
-        const updated = parsed.products.map(saved => {
-          if (saved.cloudPhotos && saved.cloudPhotos.length > 0) {
-            const key = saved.photoKey || ('custom_' + saved.id);
-            PRODUCT_PHOTOS[key] = saved.cloudPhotos;
-            saved.photoKey = key;
-          }
-          const builtin = products.find(p => p.id === saved.id);
-          if (builtin && builtin.photoKey && !String(builtin.photoKey).startsWith('custom_')) {
-            return {...saved, photoKey: builtin.photoKey};
-          }
-          return saved;
-        });
+      await waitForFirebase();
+      const { products: fsProducts, photos: fsPhotos } = await window.fsLoadProducts();
+      if (fsProducts.length > 0) {
         products.length = 0;
-        updated.forEach(p => products.push(p));
+        fsProducts.forEach(p => products.push(p));
+        Object.assign(PRODUCT_PHOTOS, fsPhotos);
       }
-      if (parsed.config) Object.assign(config, parsed.config);
-      if (parsed.nextId) nextId = parsed.nextId;
       return true;
     } catch(e) {
-      console.error('Erro ao carregar:', e);
+      console.error('Erro ao carregar do Firestore:', e);
       return false;
     }
   }
